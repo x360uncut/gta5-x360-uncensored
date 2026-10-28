@@ -67,17 +67,23 @@ python3 patcher.py /path/to/xbox360a.rpf --restore
 
 ## Встроенные инструменты
 
-### `gxt2_tool.py` — Консольный редактор GXT2 (Xbox 360 & PC)
+### `gxt2_tool.py` - Консольный редактор GXT2 (Xbox 360 & PC)
 
 Автономная Python-утилита для декодирования, кодирования и инспекции таблиц локализации GTA V:
 ```bash
-# Декодировать .gxt2 в читаемый JSON:
+# Декодировать один .gxt2 в читаемый JSON:
 python3 gxt2_tool.py decode trev1.gxt2 trev1.json
 
 # Собрать JSON обратно в Big-Endian GXT2 для Xbox 360:
 python3 gxt2_tool.py encode trev1.json trev1_mod.gxt2 --platform x360
 
-# Посчитать хеш метки (RAGE Jenkins joaat):
+# Собрать ВСЮ базу uncensored_subtitles.json (221 файл) в папку с GXT2 файлами:
+python3 gxt2_tool.py encode data/uncensored_subtitles.json --output-dir out_gxt2/ --platform x360
+
+# Декодировать целую папку с .gxt2 файлами в один сводный JSON:
+python3 gxt2_tool.py decode out_gxt2/ combined_subtitles.json
+
+# Посчитать хеш метки (RAGE Jenkins joaat с побайтовым ASCII-lowercasing):
 python3 gxt2_tool.py hash SUB_PHILIPS_01
 ```
 

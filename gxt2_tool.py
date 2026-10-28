@@ -3,6 +3,7 @@
 GTA V GXT2 localization text tool.
 Supports decoding, encoding, inspecting, and Jenkins One-At-A-Time hashing.
 Works with PC (little-endian) and Xbox 360 / PS3 (big-endian).
+Supports single files and multi-file batch dictionaries.
 """
 
 import sys
@@ -10,17 +11,19 @@ import os
 import struct
 import json
 import argparse
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Tuple, Union, Any
 
 
 def rage_joaat(key: str) -> int:
     """
     RAGE atStringHash / Jenkins One-at-a-time (joaat) 32-bit hash.
-    Text labels are case-insensitive in RAGE (lowercased before hashing).
+    C++ implementation converts ASCII uppercase characters to lowercase by byte.
     """
-    key_bytes = key.lower().encode('utf-8')
+    key_bytes = key.encode('utf-8')
     h = 0
     for b in key_bytes:
+        if 65 <= b <= 90:  # 'A'-'Z'
+            b += 32
         h = (h + b) & 0xFFFFFFFF
         h = (h + (h << 10)) & 0xFFFFFFFF
         h = (h ^ (h >> 6)) & 0xFFFFFFFF
@@ -31,22 +34,19 @@ def rage_joaat(key: str) -> int:
 
 
 def parse_key_hash(key: Union[str, int]) -> int:
-    """Converts a dict key (hex string '0x12AB', decimal '123', or label 'SUB_01') to a 32-bit hash."""
+    """
+    Converts a key to a 32-bit unsigned hash.
+    Only explicit '0x' or '0X' hexadecimal strings are parsed as hex values.
+    All other strings (including 'DEADBEEF', '123', 'SUB_01') are hashed via rage_joaat.
+    """
     if isinstance(key, int):
         return key & 0xFFFFFFFF
     key_str = str(key).strip()
     if key_str.startswith(('0x', '0X')):
-        return int(key_str, 16) & 0xFFFFFFFF
-    # Check if purely hexadecimal 8 chars
-    if len(key_str) == 8 and all(c in '0123456789abcdefABCDEF' for c in key_str):
         try:
             return int(key_str, 16) & 0xFFFFFFFF
         except ValueError:
-            pass
-    # If integer string
-    if key_str.isdigit():
-        return int(key_str) & 0xFFFFFFFF
-    # Otherwise treat as label name and compute joaat
+            raise ValueError(f"Invalid hexadecimal key: {key_str}")
     return rage_joaat(key_str)
 
 
@@ -103,32 +103,30 @@ def decode_gxt2(data: bytes, endian: str = 'auto') -> Dict[str, str]:
         return {}
 
     # Check offset base: relative to file start or relative to string block?
-    min_off = min(off for _, off in entries)
-    if min_off >= entry_table_end:
-        # Offsets are absolute from start of file
+    # Exclude 0 offsets to avoid false detection on empty strings
+    valid_offsets = [off for _, off in entries if off > 0]
+    if valid_offsets and min(valid_offsets) >= entry_table_end:
         base_offset = 0
     else:
-        # Offsets are relative to start of string pool
         base_offset = entry_table_end
 
     result: Dict[str, str] = {}
     for h, off in entries:
+        if off == 0 and base_offset == 0:
+            result[f"0x{h:08X}"] = ""
+            continue
         str_start = base_offset + off
         if str_start >= len(data):
             result[f"0x{h:08X}"] = ""
             continue
-        # Find null-terminator
         str_end = data.find(b'\x00', str_start)
-        if str_end == -1:
-            raw_str = data[str_start:]
-        else:
-            raw_str = data[str_start:str_end]
-        
+        raw_str = data[str_start:] if str_end == -1 else data[str_start:str_end]
+
         try:
             text = raw_str.decode('utf-8')
         except UnicodeDecodeError:
             text = raw_str.decode('utf-8', errors='replace')
-        
+
         result[f"0x{h:08X}"] = text
 
     return result
@@ -144,17 +142,18 @@ def encode_gxt2(
     """
     Encodes a dict of {key: text} into GXT2 binary format.
     Automatically sorts by hash and generates valid offsets.
+    Handles hash deduplication cleanly.
     """
     e = '>' if endian in ('big', 'be', '>') else '<'
 
-    # Resolve hashes
-    parsed_entries: List[Tuple[int, str]] = []
+    # Resolve hashes and deduplicate
+    unique_entries: Dict[int, str] = {}
     for k, text in strings_map.items():
         h = parse_key_hash(k)
-        parsed_entries.append((h, text if text is not None else ""))
+        unique_entries[h] = text if text is not None else ""
 
     # RAGE requirement: MUST be sorted ascending by unsigned 32-bit hash!
-    parsed_entries.sort(key=lambda x: x[0])
+    parsed_entries: List[Tuple[int, str]] = sorted(unique_entries.items(), key=lambda x: x[0])
 
     count = len(parsed_entries)
     entry_table_size = 8 + count * 8
@@ -191,7 +190,31 @@ def encode_gxt2(
     return bytes(output)
 
 
+def is_nested_dataset(data: Any) -> bool:
+    """Checks if a parsed JSON is a multi-file dataset: { 'file.gxt2': { '0x...': 'text' } }"""
+    if isinstance(data, dict) and data:
+        first_val = next(iter(data.values()))
+        return isinstance(first_val, dict)
+    return False
+
+
 def cmd_decode(args):
+    # Check if input is a directory of GXT2 files
+    if os.path.isdir(args.input):
+        combined: Dict[str, Dict[str, str]] = {}
+        for root, _, files in os.walk(args.input):
+            for fn in files:
+                if fn.lower().endswith('.gxt2'):
+                    full_p = os.path.join(root, fn)
+                    with open(full_p, 'rb') as f:
+                        data = f.read()
+                    combined[fn] = decode_gxt2(data, endian=args.endian)
+        out_path = args.output or "combined_subtitles.json"
+        with open(out_path, 'w', encoding='utf-8') as f:
+            json.dump(combined, f, ensure_ascii=False, indent=2)
+        print(f"[+] Decoded {len(combined)} GXT2 files from directory -> {out_path}")
+        return
+
     with open(args.input, 'rb') as f:
         data = f.read()
 
@@ -201,16 +224,40 @@ def cmd_decode(args):
     with open(out_path, 'w', encoding='utf-8') as f:
         json.dump(res, f, ensure_ascii=False, indent=2)
 
-    print(f"[+] decoded {len(res)} strings -> {out_path}")
+    print(f"[+] Decoded {len(res)} strings -> {out_path}")
 
 
 def cmd_encode(args):
     with open(args.input, 'r', encoding='utf-8') as f:
         data = json.load(f)
 
-    endian = 'big' if args.platform == 'x360' or args.endian == 'big' else 'little'
+    # Resolve endianness
+    if args.endian:
+        endian = args.endian
+    else:
+        endian = 'big' if args.platform == 'x360' else 'little'
+
     file_rel = not args.block_relative
     magic = b'2TXG' if args.magic_2txg else b'GXT2'
+
+    # Check for multi-file dataset
+    if is_nested_dataset(data):
+        out_dir = args.output_dir or args.output or "output_gxt2"
+        os.makedirs(out_dir, exist_ok=True)
+        print(f"[*] Batch encoding multi-file dataset ({len(data)} files) -> {out_dir}/...")
+        for fn, strings_map in data.items():
+            out_bytes = encode_gxt2(
+                strings_map,
+                endian=endian,
+                magic=magic,
+                file_relative=file_rel,
+                deduplicate=not args.no_dedup
+            )
+            out_fn = fn if fn.lower().endswith('.gxt2') else (fn + '.gxt2')
+            with open(os.path.join(out_dir, out_fn), 'wb') as f_out:
+                f_out.write(out_bytes)
+        print(f"[+] Successfully encoded {len(data)} GXT2 files (endian={endian})!")
+        return
 
     out_bytes = encode_gxt2(
         data,
@@ -224,7 +271,7 @@ def cmd_encode(args):
     with open(out_path, 'wb') as f:
         f.write(out_bytes)
 
-    print(f"[+] encoded {len(data)} strings -> {out_path} ({len(out_bytes)} bytes, endian={endian})")
+    print(f"[+] Encoded {len(data)} strings -> {out_path} ({len(out_bytes):,} bytes, endian={endian})")
 
 
 def cmd_info(args):
@@ -266,17 +313,18 @@ def main():
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # decode
-    p_dec = subparsers.add_parser("decode", help="decode .gxt2 to .json")
-    p_dec.add_argument("input", help="input .gxt2 file")
+    p_dec = subparsers.add_parser("decode", help="decode .gxt2 to .json (or a directory of .gxt2 into a combined json)")
+    p_dec.add_argument("input", help="input .gxt2 file or directory")
     p_dec.add_argument("output", nargs="?", help="output .json file")
     p_dec.add_argument("--endian", choices=["auto", "little", "big"], default="auto", help="byte order (default: auto)")
 
     # encode
-    p_enc = subparsers.add_parser("encode", help="encode .json to .gxt2")
+    p_enc = subparsers.add_parser("encode", help="encode .json to .gxt2 (supports single files and multi-file datasets)")
     p_enc.add_argument("input", help="input .json file")
     p_enc.add_argument("output", nargs="?", help="output .gxt2 file")
-    p_enc.add_argument("--platform", choices=["pc", "x360"], default="pc", help="target platform (pc=little-endian, x360=big-endian)")
-    p_enc.add_argument("--endian", choices=["little", "big"], default="little", help="byte order")
+    p_enc.add_argument("--output-dir", help="output directory for multi-file datasets")
+    p_enc.add_argument("--platform", choices=["pc", "x360"], default="x360", help="target platform (default: x360)")
+    p_enc.add_argument("--endian", choices=["little", "big"], help="explicit byte order override")
     p_enc.add_argument("--block-relative", action="store_true", help="write offsets relative to string block instead of file start")
     p_enc.add_argument("--magic-2txg", action="store_true", help="use b'2TXG' magic instead of canonical b'GXT2'")
     p_enc.add_argument("--no-dedup", action="store_true", help="disable string deduplication")
