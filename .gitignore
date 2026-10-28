@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.bak
+*.orig_russian.rpf
+xbox360a.rpf
+*.iso
+*.bin
