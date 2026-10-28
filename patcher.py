@@ -40,16 +40,21 @@ def validate_target_container(f, file_path: str):
         )
 
 
-def patch_xbox360a(input_path: str, backup: bool = True):
+def patch_xbox360a(input_path: str, payload_path: str = None, backup: bool = True):
     if not os.path.exists(input_path):
         print(f"[-] Error: file not found: {input_path}")
         sys.exit(1)
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    patch_gz = os.path.join(script_dir, "data", "russian_uncensored.rpf.gz")
+    if not payload_path:
+        payload_path = os.path.join(script_dir, "data", "russian_uncensored.rpf.gz")
 
-    if not os.path.exists(patch_gz):
-        print(f"[-] Error: patch data not found at {patch_gz}")
+    if not os.path.exists(payload_path):
+        print("[-] Error: Patch payload not found!")
+        print(f"    Expected: {payload_path}")
+        print("    Due to DMCA copyright policies, the compiled game partition is distributed")
+        print("    separately via GitHub Releases or Telegram.")
+        print("    Place 'russian_uncensored.rpf.gz' into data/, or use --payload <path>.")
         sys.exit(1)
 
     print(f"[*] Validating target container: {input_path}...")
@@ -60,8 +65,8 @@ def patch_xbox360a(input_path: str, backup: bool = True):
         print(f"[-] Validation failed: {e}")
         sys.exit(1)
 
-    print(f"[*] Decompressing uncensored Russian localization archive...")
-    with gzip.open(patch_gz, "rb") as f:
+    print(f"[*] Decompressing uncensored Russian localization archive from {payload_path}...")
+    with gzip.open(payload_path, "rb") as f:
         mod_rpf = f.read()
 
     if len(mod_rpf) > RUSSIAN_RPF_ALLOCATED_LEN:
@@ -144,6 +149,7 @@ def restore_xbox360a(input_path: str):
 def main():
     parser = argparse.ArgumentParser(description="GTA V Xbox 360 Uncensored Subtitles Patcher")
     parser.add_argument("file", help="Path to xbox360a.rpf")
+    parser.add_argument("--payload", help="Custom path to russian_uncensored.rpf.gz (default: data/russian_uncensored.rpf.gz)")
     parser.add_argument("--restore", action="store_true", help="Restore original 1C localization from backup")
     parser.add_argument("--no-backup", action="store_true", help="Skip creating backup")
 
@@ -151,7 +157,7 @@ def main():
     if args.restore:
         restore_xbox360a(args.file)
     else:
-        patch_xbox360a(args.file, backup=not args.no_backup)
+        patch_xbox360a(args.file, payload_path=args.payload, backup=not args.no_backup)
 
 
 if __name__ == "__main__":
