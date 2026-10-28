@@ -42,15 +42,17 @@ def patch_xbox360a(input_path: str, backup: bool = True):
     
     # Backup if requested
     if backup:
-        backup_path = input_path + ".bak"
+        backup_path = input_path + ".orig_russian.rpf"
         if not os.path.exists(backup_path):
             print(f"[*] Creating backup at {backup_path}...")
             # We only need to backup the original russian.rpf bytes to save 2GB disk space!
-            with open(input_path, "rb") as f_in, open(input_path + ".orig_russian.rpf", "wb") as f_bak:
+            with open(input_path, "rb") as f_in, open(backup_path, "wb") as f_bak:
                 f_in.seek(RUSSIAN_RPF_OFFSET)
                 orig_bytes = f_in.read(RUSSIAN_RPF_ALLOCATED_LEN)
                 f_bak.write(orig_bytes)
-            print(f"[+] Original localization backed up to {input_path}.orig_russian.rpf (7.6 MB)")
+            print(f"[+] Original localization backed up to {backup_path} (7.6 MB)")
+        else:
+            print(f"[*] Preserving existing backup at {backup_path}")
 
     print(f"[*] Patching {input_path} at offset 0x{RUSSIAN_RPF_OFFSET:X}...")
     with open(input_path, "r+b") as f:
