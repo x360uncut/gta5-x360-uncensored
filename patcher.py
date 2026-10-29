@@ -55,7 +55,7 @@ def patch_xbox360a(input_path: str, payload_path: str = None, backup: bool = Tru
         print("[-] Error: Patch payload not found!")
         print(f"    Expected: {payload_path}")
         print("    Due to DMCA copyright policies, the compiled game partition is distributed")
-        print("    separately via GitHub Releases or Telegram.")
+        print("    separately via our Telegram channel: https://t.me/trnslatd")
         print("    Place 'russian_uncensored.rpf.gz' into data/, or use --payload <path>.")
         sys.exit(1)
 

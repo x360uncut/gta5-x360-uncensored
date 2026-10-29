@@ -38,7 +38,7 @@ git clone https://github.com/x360uncut/gta5-x360-uncensored.git
 cd gta5-x360-uncensored
 ```
 
-2. Скачайте скомпилированный языковой архив `russian_uncensored.rpf.gz` (из раздела **GitHub Releases** или нашего Telegram) и положите его в папку `data/`:
+2. Скачайте скомпилированный языковой архив `russian_uncensored.rpf.gz` из нашего Telegram-канала **[@trnslatd](https://t.me/trnslatd)** и положите его в папку `data/`:
 ```bash
 # Либо укажите путь к нему через флаг --payload:
 python3 patcher.py /path/to/xbox360a.rpf --payload /path/to/russian_uncensored.rpf.gz
