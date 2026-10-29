@@ -10,13 +10,14 @@ import gzip
 import argparse
 
 RUSSIAN_RPF_OFFSET = 0x26491200
-RUSSIAN_RPF_ALLOCATED_LEN = 7647232
+RUSSIAN_RPF_ALLOCATED_LEN = 3823616
 RUSSIAN_RPF_HEADER = bytes.fromhex("525046370000025680001d000ffffff7")
+SPANISH_RPF_OFFSET = 0x26836A00
 
 def validate_target_container(f, file_path: str):
     """Validates that the file is a genuine Xbox 360 GTA V xbox360a.rpf archive."""
     file_size = os.path.getsize(file_path)
-    min_required_size = RUSSIAN_RPF_OFFSET + RUSSIAN_RPF_ALLOCATED_LEN
+    min_required_size = SPANISH_RPF_OFFSET + 4
     if file_size < min_required_size:
         raise ValueError(
             f"File is too small ({file_size:,} bytes). Expected at least {min_required_size:,} bytes for xbox360a.rpf."
@@ -39,6 +40,15 @@ def validate_target_container(f, file_path: str):
             f"Invalid partition header at offset 0x{RUSSIAN_RPF_OFFSET:X}: {nested_header.hex()}. "
             f"Expected genuine russian.rpf header ({RUSSIAN_RPF_HEADER.hex()}). "
             "The file may belong to a different game version, language, region, or custom repack."
+        )
+
+    # Check boundary partition (spanish.rpf)
+    f.seek(SPANISH_RPF_OFFSET)
+    spanish_magic = f.read(4)
+    if spanish_magic != b'RPF7':
+        raise ValueError(
+            f"Corrupted boundary at offset 0x{SPANISH_RPF_OFFSET:X}: {spanish_magic!r}. "
+            "Expected genuine b'RPF7' (spanish.rpf). Ensure target container has not been overwritten."
         )
 
 
@@ -99,7 +109,7 @@ def patch_xbox360a(input_path: str, payload_path: str = None, backup: bool = Tru
                         raise ValueError(f"Original partition at offset 0x{RUSSIAN_RPF_OFFSET:X} is not RPF7")
                     f_bak.write(orig_bytes)
                 os.replace(temp_bak, backup_path)
-                print(f"[+] Original localization safely backed up to {backup_path} (7.6 MB)")
+                print(f"[+] Original localization safely backed up to {backup_path} (3.8 MB)")
             except Exception as e:
                 if os.path.exists(temp_bak):
                     os.remove(temp_bak)
@@ -112,6 +122,11 @@ def patch_xbox360a(input_path: str, payload_path: str = None, backup: bool = Tru
     with open(input_path, "r+b") as f:
         f.seek(RUSSIAN_RPF_OFFSET)
         f.write(padded_rpf)
+        # Verify boundary partition was not touched
+        f.seek(SPANISH_RPF_OFFSET)
+        boundary_magic = f.read(4)
+        if boundary_magic != b'RPF7':
+            raise RuntimeError(f"Integrity check failed! spanish.rpf header corrupted: {boundary_magic!r}")
 
     print("[+] SUCCESS! Fully uncensored Russian subtitles injected into xbox360a.rpf.")
     print("    Copy this file to your Xbox 360 at Hdd1:\\Games\\GTA5\\xbox360a.rpf")
