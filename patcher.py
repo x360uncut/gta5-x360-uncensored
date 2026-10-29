@@ -11,6 +11,7 @@ import argparse
 
 RUSSIAN_RPF_OFFSET = 0x26491200
 RUSSIAN_RPF_ALLOCATED_LEN = 7647232
+RUSSIAN_RPF_HEADER = bytes.fromhex("525046370000025680001d000ffffff7")
 
 def validate_target_container(f, file_path: str):
     """Validates that the file is a genuine Xbox 360 GTA V xbox360a.rpf archive."""
@@ -30,13 +31,14 @@ def validate_target_container(f, file_path: str):
             "Ensure you selected a valid xbox360a.rpf archive."
         )
 
-    # Check partition magic at target offset
+    # Check partition magic and exact header at target offset
     f.seek(RUSSIAN_RPF_OFFSET)
-    nested_magic = f.read(4)
-    if nested_magic != b'RPF7':
+    nested_header = f.read(16)
+    if nested_header != RUSSIAN_RPF_HEADER:
         raise ValueError(
-            f"Invalid nested partition signature at offset 0x{RUSSIAN_RPF_OFFSET:X}: {nested_magic!r}. "
-            "Expected b'RPF7'. The file may belong to a different game version or disc."
+            f"Invalid partition header at offset 0x{RUSSIAN_RPF_OFFSET:X}: {nested_header.hex()}. "
+            f"Expected genuine russian.rpf header ({RUSSIAN_RPF_HEADER.hex()}). "
+            "The file may belong to a different game version, language, region, or custom repack."
         )
 
 
@@ -120,6 +122,14 @@ def restore_xbox360a(input_path: str):
         print(f"[-] Error: file not found: {input_path}")
         sys.exit(1)
 
+    print(f"[*] Validating target container: {input_path}...")
+    try:
+        with open(input_path, "rb") as f_check:
+            validate_target_container(f_check, input_path)
+    except Exception as e:
+        print(f"[-] Validation failed: {e}")
+        sys.exit(1)
+
     bak_path = input_path + ".orig_russian.rpf"
     if not os.path.exists(bak_path):
         print(f"[-] Error: Backup not found: {bak_path}")
@@ -131,9 +141,9 @@ def restore_xbox360a(input_path: str):
         sys.exit(1)
 
     with open(bak_path, "rb") as f_bak:
-        head = f_bak.read(4)
-        if head != b'RPF7':
-            print(f"[-] Error: Backup file signature is invalid ({head!r}, expected b'RPF7')")
+        head = f_bak.read(16)
+        if head != RUSSIAN_RPF_HEADER:
+            print(f"[-] Error: Backup file header is invalid ({head.hex()}, expected {RUSSIAN_RPF_HEADER.hex()})")
             sys.exit(1)
         f_bak.seek(0)
         orig = f_bak.read()

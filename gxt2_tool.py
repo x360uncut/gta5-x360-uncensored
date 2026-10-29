@@ -203,12 +203,15 @@ def cmd_decode(args):
     if os.path.isdir(args.input):
         combined: Dict[str, Dict[str, str]] = {}
         for root, _, files in os.walk(args.input):
-            for fn in files:
+            for fn in sorted(files):
                 if fn.lower().endswith('.gxt2'):
                     full_p = os.path.join(root, fn)
+                    rel_p = os.path.relpath(full_p, args.input).replace('\\', '/')
                     with open(full_p, 'rb') as f:
                         data = f.read()
-                    combined[fn] = decode_gxt2(data, endian=args.endian)
+                    # Use relative path if nested to prevent name collisions
+                    key = rel_p if rel_p != fn else fn
+                    combined[key] = decode_gxt2(data, endian=args.endian)
         out_path = args.output or "combined_subtitles.json"
         with open(out_path, 'w', encoding='utf-8') as f:
             json.dump(combined, f, ensure_ascii=False, indent=2)
@@ -246,15 +249,32 @@ def cmd_encode(args):
         os.makedirs(out_dir, exist_ok=True)
         print(f"[*] Batch encoding multi-file dataset ({len(data)} files) -> {out_dir}/...")
         for fn, strings_map in data.items():
+            final_map = strings_map
+            # If base directory is provided, merge delta into the original GXT2
+            if getattr(args, 'base_dir', None):
+                out_fn_candidate = fn if fn.lower().endswith('.gxt2') else (fn + '.gxt2')
+                base_candidate = os.path.join(args.base_dir, out_fn_candidate)
+                if os.path.exists(base_candidate):
+                    with open(base_candidate, 'rb') as f_base:
+                        base_bytes = f_base.read()
+                    base_raw = decode_gxt2(base_bytes, endian=args.endian or 'auto')
+                    # Normalize by 0xHEX key so string labels in strings_map cleanly overwrite decoded hex keys
+                    base_dict = {f"0x{parse_key_hash(k):08X}": v for k, v in base_raw.items()}
+                    for k, v in strings_map.items():
+                        base_dict[f"0x{parse_key_hash(k):08X}"] = v
+                    final_map = base_dict
+
             out_bytes = encode_gxt2(
-                strings_map,
+                final_map,
                 endian=endian,
                 magic=magic,
                 file_relative=file_rel,
                 deduplicate=not args.no_dedup
             )
             out_fn = fn if fn.lower().endswith('.gxt2') else (fn + '.gxt2')
-            with open(os.path.join(out_dir, out_fn), 'wb') as f_out:
+            dest_path = os.path.join(out_dir, out_fn)
+            os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+            with open(dest_path, 'wb') as f_out:
                 f_out.write(out_bytes)
         print(f"[+] Successfully encoded {len(data)} GXT2 files (endian={endian})!")
         return
@@ -323,6 +343,7 @@ def main():
     p_enc.add_argument("input", help="input .json file")
     p_enc.add_argument("output", nargs="?", help="output .gxt2 file")
     p_enc.add_argument("--output-dir", help="output directory for multi-file datasets")
+    p_enc.add_argument("--base-dir", help="base directory with original .gxt2 files to merge delta with (prevents losing non-modified dialogue)")
     p_enc.add_argument("--platform", choices=["pc", "x360"], default="x360", help="target platform (default: x360)")
     p_enc.add_argument("--endian", choices=["little", "big"], help="explicit byte order override")
     p_enc.add_argument("--block-relative", action="store_true", help="write offsets relative to string block instead of file start")
